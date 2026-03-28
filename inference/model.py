@@ -1,4 +1,5 @@
 import math
+import os
 from dataclasses import dataclass
 from typing import Tuple, Optional, Literal
 
@@ -7,12 +8,20 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as dist
 
-from kernel import act_quant, fp8_gemm, fp8_index
+from kernel import (
+    USE_TORCH_FP8_FALLBACK,
+    act_quant,
+    fp8_dequant_input,
+    fp8_gemm,
+    fp8_gemm_cached_weight,
+    fp8_index,
+)
 
 
 world_size = 1
 rank = 0
 block_size = 128
+ENABLE_MLA_WQ_B_FP32_CACHE = os.getenv("DEEPSEEK_ENABLE_MLA_WQ_B_FP32_CACHE", "0") == "1"
 
 @dataclass
 class ModelArgs:
@@ -449,21 +458,57 @@ class Indexer(torch.nn.Module):
         self.weights_proj = Linear(self.dim, self.n_heads, dtype=torch.float32)
         self.softmax_scale = self.head_dim ** -0.5
         self.scale_fmt = args.scale_fmt
+        self.dequant_wq_b = None
+        self.dequant_wk = None
+        self.dequant_wk_t = None
 
         self.register_buffer("k_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.head_dim, dtype=torch.float8_e4m3fn), persistent=False)
         self.register_buffer("k_scale_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.head_dim // block_size, dtype=torch.float32), persistent=False)
 
 
-    def forward(self, x: torch.Tensor, qr: torch.Tensor, start_pos: int, freqs_cis: torch.Tensor, mask: Optional[torch.Tensor]):
+    def forward(
+        self,
+        x: torch.Tensor,
+        qr: torch.Tensor,
+        start_pos: int,
+        freqs_cis: torch.Tensor,
+        mask: Optional[torch.Tensor],
+        qr_fp8: Optional[torch.Tensor] = None,
+        qr_scale: Optional[torch.Tensor] = None,
+        x_fp8: Optional[torch.Tensor] = None,
+        x_scale: Optional[torch.Tensor] = None,
+    ):
         bsz, seqlen, _ = x.size()
         end_pos = start_pos + seqlen
-        q = self.wq_b(qr)
+        if USE_TORCH_FP8_FALLBACK and self.wq_b.scale is not None:
+            if self.dequant_wq_b is None:
+                self.dequant_wq_b = weight_dequant(self.wq_b.weight, self.wq_b.scale).float().contiguous()
+            if qr_fp8 is None or qr_scale is None:
+                qr_fp8, qr_scale = act_quant(qr, block_size, self.scale_fmt)
+            q = fp8_gemm_cached_weight(qr_fp8, qr_scale, self.dequant_wq_b)
+        else:
+            q = self.wq_b(qr)
         q = q.view(bsz, seqlen, self.n_heads, self.head_dim)
         q_pe, q_nope = torch.split(q, [self.rope_head_dim, self.head_dim - self.rope_head_dim], dim=-1)
         # rope in indexer is not interleaved
         q_pe = apply_rotary_emb(q_pe, freqs_cis, False)
         q = torch.cat([q_pe, q_nope], dim=-1)
-        k = self.wk(x)
+        if USE_TORCH_FP8_FALLBACK and self.wk.scale is not None:
+            if self.dequant_wk is None:
+                self.dequant_wk = weight_dequant(self.wk.weight, self.wk.scale).float().contiguous()
+            if self.dequant_wk_t is None:
+                self.dequant_wk_t = self.dequant_wk.t().contiguous()
+            if x_fp8 is None or x_scale is None:
+                x_fp8, x_scale = act_quant(x, block_size, self.scale_fmt)
+            k = fp8_gemm_cached_weight(
+                x_fp8,
+                x_scale,
+                self.dequant_wk,
+                target_hint="indexer_wk",
+                b_deq_t=self.dequant_wk_t,
+            )
+        else:
+            k = self.wk(x)
         k = self.k_norm(k)
         k_pe, k_nope = torch.split(k, [self.rope_head_dim, self.head_dim - self.rope_head_dim], dim=-1)
         # rope in indexer is not interleaved
@@ -481,18 +526,26 @@ class Indexer(torch.nn.Module):
         if mask is not None:
             index_score += mask
         topk_indices = index_score.topk(min(self.index_topk, end_pos), dim=-1)[1]
-        topk_indices_ = topk_indices.clone()
-        dist.broadcast(topk_indices_, src=0)
-        assert torch.all(topk_indices == topk_indices_), f"{topk_indices=} {topk_indices_=}"
+        if world_size > 1:
+            topk_indices_ = topk_indices.clone()
+            dist.broadcast(topk_indices_, src=0)
+            assert torch.all(topk_indices == topk_indices_), f"{topk_indices=} {topk_indices_=}"
         return topk_indices
 
 
 def weight_dequant(weight, scale):
-    shape = weight.shape
     assert weight.dim() == 2
-    weight = weight.view(shape[0] // block_size, block_size, shape[1] // block_size, block_size).transpose(1, 2).contiguous().view(-1, block_size * block_size)
-    weight = (weight.float() * scale.view(-1, 1).float()).to(torch.get_default_dtype()).view(shape[0] // block_size, shape[1] // block_size, block_size, block_size).transpose(1, 2).contiguous().view(shape)
-    return weight
+    n, k = weight.shape
+    if n % block_size == 0 and k % block_size == 0:
+        n_blocks = n // block_size
+        k_blocks = k // block_size
+        return (
+            weight.view(n_blocks, block_size, k_blocks, block_size).float()
+            * scale.view(n_blocks, 1, k_blocks, 1).float()
+        ).to(torch.get_default_dtype()).view(n, k)
+
+    scale_full = scale.repeat_interleave(block_size, dim=0).repeat_interleave(block_size, dim=1)
+    return (weight.float() * scale_full[:n, :k].float()).to(torch.get_default_dtype())
 
 
 class MLA(nn.Module):
@@ -540,6 +593,9 @@ class MLA(nn.Module):
 
         self.register_buffer("kv_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.kv_lora_rank), persistent=False)
         self.register_buffer("pe_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.qk_rope_head_dim), persistent=False)
+        self.dequant_wq_a = None
+        self.dequant_wq_b = None
+        self.dequant_wkv_a = None
         self.dequant_wkv_b = None
 
     def forward(self, x: torch.Tensor, start_pos: int, freqs_cis: torch.Tensor, mask: Optional[torch.Tensor]):
@@ -557,12 +613,33 @@ class MLA(nn.Module):
         """
         bsz, seqlen, _ = x.size()
         end_pos = start_pos + seqlen
-        qr = self.q_norm(self.wq_a(x))
-        q = self.wq_b(qr)
+        x_fp8 = x_scale = None
+        if USE_TORCH_FP8_FALLBACK and self.wq_a.scale is not None and self.wkv_a.scale is not None:
+            if self.dequant_wq_a is None:
+                self.dequant_wq_a = weight_dequant(self.wq_a.weight, self.wq_a.scale).float().contiguous()
+            if self.dequant_wkv_a is None:
+                self.dequant_wkv_a = weight_dequant(self.wkv_a.weight, self.wkv_a.scale).float().contiguous()
+            x_fp8, x_scale = act_quant(x, block_size, self.scale_fmt)
+            x_deq = fp8_dequant_input(x_fp8, x_scale)
+            qr = self.q_norm(F.linear(x_deq.float(), self.dequant_wq_a).to(torch.get_default_dtype()))
+            kv = F.linear(x_deq.float(), self.dequant_wkv_a).to(torch.get_default_dtype())
+        else:
+            qr = self.q_norm(self.wq_a(x))
+            kv = self.wkv_a(x)
+        qr_fp8 = qr_scale = None
+        if USE_TORCH_FP8_FALLBACK and self.wq_b.scale is not None:
+            qr_fp8, qr_scale = act_quant(qr, block_size, self.scale_fmt)
+            if ENABLE_MLA_WQ_B_FP32_CACHE:
+                if self.dequant_wq_b is None:
+                    self.dequant_wq_b = weight_dequant(self.wq_b.weight, self.wq_b.scale).float().contiguous()
+                q = fp8_gemm_cached_weight(qr_fp8, qr_scale, self.dequant_wq_b, target_hint="mla_wq_b")
+            else:
+                q = fp8_gemm(qr_fp8, qr_scale, self.wq_b.weight, self.wq_b.scale)
+        else:
+            q = self.wq_b(qr)
         q = q.view(bsz, seqlen, self.n_local_heads, self.qk_head_dim)
         q_nope, q_pe = torch.split(q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
         q_pe = apply_rotary_emb(q_pe, freqs_cis)
-        kv = self.wkv_a(x)
         kv, k_pe = torch.split(kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         kv = self.kv_norm(kv)
         k_pe = apply_rotary_emb(k_pe.unsqueeze(2), freqs_cis)
@@ -573,14 +650,30 @@ class MLA(nn.Module):
         self.pe_cache[:bsz, start_pos:end_pos] = k_pe.squeeze(2)
         if mask is not None:    # MHA prefill
             q = torch.cat([q_nope, q_pe], dim=-1)
-            kv = self.wkv_b(kv)
+            if USE_TORCH_FP8_FALLBACK and self.wkv_b.scale is not None:
+                if self.dequant_wkv_b is None:
+                    self.dequant_wkv_b = weight_dequant(self.wkv_b.weight, self.wkv_b.scale).float().contiguous()
+                kv_fp8, kv_scale = act_quant(kv, block_size, self.scale_fmt)
+                kv = fp8_gemm_cached_weight(kv_fp8, kv_scale, self.dequant_wkv_b, target_hint="mla_wkv_b")
+            else:
+                kv = self.wkv_b(kv)
             kv = kv.view(bsz, seqlen, self.n_local_heads, self.qk_nope_head_dim + self.v_head_dim)
             k_nope, v = torch.split(kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
             k = torch.cat([k_nope, k_pe.expand(-1, -1, self.n_local_heads, -1)], dim=-1)
             scores = torch.einsum("bshd,bthd->bsht", q, k).mul_(self.softmax_scale)
 
             # indexer
-            topk_indices = self.indexer(x, qr, start_pos, freqs_cis, mask)
+            topk_indices = self.indexer(
+                x,
+                qr,
+                start_pos,
+                freqs_cis,
+                mask,
+                qr_fp8=qr_fp8,
+                qr_scale=qr_scale,
+                x_fp8=x_fp8,
+                x_scale=x_scale,
+            )
             index_mask = torch.full((bsz, seqlen, seqlen), float("-inf"), device=x.device).scatter_(-1, topk_indices, 0)
             index_mask += mask
             scores += index_mask.unsqueeze(2)
@@ -589,7 +682,7 @@ class MLA(nn.Module):
             x = torch.einsum("bsht,bthd->bshd", scores, v)
         else:                   # MQA decode
             if self.dequant_wkv_b is None and self.wkv_b.scale is not None:
-                self.dequant_wkv_b = weight_dequant(self.wkv_b.weight, self.wkv_b.scale)
+                self.dequant_wkv_b = weight_dequant(self.wkv_b.weight, self.wkv_b.scale).float().contiguous()
             wkv_b = self.wkv_b.weight if self.dequant_wkv_b is None else self.dequant_wkv_b
             wkv_b = wkv_b.view(self.n_local_heads, -1, self.kv_lora_rank)
             q_nope = torch.einsum("bshd,hdc->bshc", q_nope, wkv_b[:, :self.qk_nope_head_dim])
@@ -597,7 +690,17 @@ class MLA(nn.Module):
                       torch.einsum("bshr,btr->bsht", q_pe, self.pe_cache[:bsz, :end_pos])) * self.softmax_scale
 
             # indexer
-            topk_indices = self.indexer(x, qr, start_pos, freqs_cis, mask)
+            topk_indices = self.indexer(
+                x,
+                qr,
+                start_pos,
+                freqs_cis,
+                mask,
+                qr_fp8=qr_fp8,
+                qr_scale=qr_scale,
+                x_fp8=x_fp8,
+                x_scale=x_scale,
+            )
             index_mask = torch.full((bsz, 1, end_pos), float("-inf"), device=x.device).scatter_(-1, topk_indices, 0)
             scores += index_mask.unsqueeze(2)
 

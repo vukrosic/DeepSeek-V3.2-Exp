@@ -1,0 +1,34 @@
+{
+  "id": "01_act_quant_exact",
+  "title": "Act Quant Exact Search",
+  "scope": "Activation quantization only",
+  "goal": "Search exact implementations of act quantization that preserve fp8 outputs and scale tensors exactly.",
+  "depends_on": [],
+  "primary_script": "kernel_phase0_harness.py",
+  "target_metrics": [
+    "act_quant.index_q.benchmark.mean_ms",
+    "act_quant.kv_cache.benchmark.mean_ms"
+  ],
+  "exactness_gate": [
+    "Quantized fp8 tensor must match exactly.",
+    "Scale tensor must match exactly."
+  ],
+  "allowed_changes": [
+    "Kernel schedule",
+    "Kernel launch config",
+    "Backend implementation",
+    "Fusion of internal quantization steps"
+  ],
+  "forbidden_changes": [
+    "Scale definition",
+    "Clamp range",
+    "Rounding behavior",
+    "Output dtype"
+  ],
+  "candidate_variants": [
+    "TileLang schedule search",
+    "CUDA custom kernel",
+    "Triton exact kernel",
+    "Vectorized CUDA fallback"
+  ]
+}

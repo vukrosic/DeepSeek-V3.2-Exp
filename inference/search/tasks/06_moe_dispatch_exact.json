@@ -1,0 +1,30 @@
+{
+  "id": "06_moe_dispatch_exact",
+  "title": "MoE Dispatch Exact Search",
+  "scope": "MoE token dispatch and expert accumulation only",
+  "goal": "Search exact expert-dispatch implementations that preserve selected experts, weights, and accumulation results.",
+  "depends_on": [],
+  "primary_script": "kernel_phase0_harness.py",
+  "target_metrics": [
+    "future.moe.forward.mean_ms"
+  ],
+  "exactness_gate": [
+    "Selected experts must match exactly.",
+    "Accumulated output tensor must match baseline exactly."
+  ],
+  "allowed_changes": [
+    "Token packing strategy",
+    "Grouped GEMM implementation",
+    "Scatter/combine kernel"
+  ],
+  "forbidden_changes": [
+    "Gate semantics",
+    "Expert ordering",
+    "Weight normalization changes"
+  ],
+  "candidate_variants": [
+    "Exact grouped GEMM path",
+    "Exact sort-pack-scatter path",
+    "Exact CUDA dispatch kernel"
+  ]
+}

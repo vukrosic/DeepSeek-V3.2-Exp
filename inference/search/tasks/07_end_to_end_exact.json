@@ -1,0 +1,35 @@
+{
+  "id": "07_end_to_end_exact",
+  "title": "End-to-End Exact Validation",
+  "scope": "Full decode path",
+  "goal": "Validate that accepted kernel-level changes preserve end-to-end decode behavior and improve runtime.",
+  "depends_on": [
+    "01_act_quant_exact",
+    "02_fp8_gemm_exact",
+    "03_fp8_index_exact",
+    "05_attention_exact",
+    "06_moe_dispatch_exact"
+  ],
+  "primary_script": "kernel_phase0_harness.py",
+  "target_metrics": [
+    "future.e2e.prefill_toks_per_s",
+    "future.e2e.decode_toks_per_s"
+  ],
+  "exactness_gate": [
+    "Fixed-seed decode outputs must match baseline exactly.",
+    "Intermediate kernel exactness must remain green."
+  ],
+  "allowed_changes": [
+    "Composition of accepted exact kernel candidates"
+  ],
+  "forbidden_changes": [
+    "Any change that bypasses a failed per-task exactness gate"
+  ],
+  "candidate_variants": [
+    "Best accepted act_quant candidate",
+    "Best accepted fp8_gemm candidate",
+    "Best accepted fp8_index candidate",
+    "Best accepted attention candidate",
+    "Best accepted MoE candidate"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "id": "04_weight_dequant_cache_exact",
+  "title": "Weight Dequant Cache Exact Search",
+  "scope": "Caching policy for exact dequantized weights",
+  "goal": "Search exact caching strategies for dequantized weight reuse without breaking memory constraints.",
+  "depends_on": [
+    "02_fp8_gemm_exact"
+  ],
+  "primary_script": "kernel_algorithm_search.py",
+  "target_metrics": [
+    "gemm.exact_linear_cached_weight.benchmark.mean_ms"
+  ],
+  "exactness_gate": [
+    "Cached-path outputs must match uncached exact path exactly.",
+    "Cache invalidation must be deterministic."
+  ],
+  "allowed_changes": [
+    "Layer-local cache",
+    "On-demand cache",
+    "Partial cache",
+    "Pinned lifetime policy"
+  ],
+  "forbidden_changes": [
+    "Changing model weights",
+    "Changing dequant math",
+    "Changing memory visible semantics across calls"
+  ],
+  "candidate_variants": [
+    "No cache",
+    "Per-layer cached dequant",
+    "Windowed cache",
+    "Decode-only cache"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "id": "03_fp8_index_exact",
+  "title": "FP8 Index Exact Search",
+  "scope": "Indexer score kernel only",
+  "goal": "Search exact implementations of the FP8 index score path while preserving identical output scores.",
+  "depends_on": [
+    "01_act_quant_exact"
+  ],
+  "primary_script": "kernel_algorithm_search.py",
+  "target_metrics": [
+    "index.current_kernel_api.benchmark.mean_ms",
+    "index.exact_einsum.benchmark.mean_ms"
+  ],
+  "exactness_gate": [
+    "Index score tensor must match exactly.",
+    "No tie-breaking changes downstream are allowed."
+  ],
+  "allowed_changes": [
+    "Kernel schedule",
+    "einsum vs matmul formulation",
+    "Backend implementation"
+  ],
+  "forbidden_changes": [
+    "Changing relu placement",
+    "Changing scale application order",
+    "Changing reduction semantics"
+  ],
+  "candidate_variants": [
+    "Current exact CUDA fallback",
+    "Exact batched matmul formulation",
+    "Exact TileLang index kernel for Ampere",
+    "Exact CUDA custom kernel"
+  ]
+}

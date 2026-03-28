@@ -1,0 +1,34 @@
+{
+  "id": "02_fp8_gemm_exact",
+  "title": "FP8 GEMM Exact Search",
+  "scope": "FP8 GEMM only",
+  "goal": "Search exact GEMM implementations for Ampere and newer GPUs without changing dequantization math or accumulation semantics.",
+  "depends_on": [
+    "01_act_quant_exact"
+  ],
+  "primary_script": "kernel_algorithm_search.py",
+  "target_metrics": [
+    "gemm.exact_linear.benchmark.mean_ms",
+    "gemm.exact_linear_cached_weight.benchmark.mean_ms"
+  ],
+  "exactness_gate": [
+    "Output tensor must match the exact float32 fallback baseline.",
+    "No weight-layout semantic change is allowed."
+  ],
+  "allowed_changes": [
+    "Use F.linear vs matmul",
+    "Use cached dequantized weights if memory budget permits",
+    "Use CUDA, CUTLASS, TileLang, Triton, or cuBLASLt"
+  ],
+  "forbidden_changes": [
+    "Lower precision accumulation in the default path",
+    "Approximate dequantization",
+    "Checkpoint format changes"
+  ],
+  "candidate_variants": [
+    "Exact F.linear path",
+    "Exact cached dequantized weight path",
+    "CUTLASS block-scaled exact path",
+    "cuBLASLt exact dequantize-plus-gemm path"
+  ]
+}

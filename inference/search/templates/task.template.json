@@ -1,0 +1,26 @@
+{
+  "id": "08_example_exact",
+  "title": "Example Exact Search",
+  "scope": "One isolated hotspot only",
+  "goal": "Describe the exact speed objective here.",
+  "depends_on": [],
+  "primary_script": "kernel_phase0_harness.py",
+  "target_metrics": [
+    "example.metric.mean_ms"
+  ],
+  "exactness_gate": [
+    "State the exact output requirement."
+  ],
+  "allowed_changes": [
+    "Kernel schedule",
+    "Backend implementation"
+  ],
+  "forbidden_changes": [
+    "Any semantic change"
+  ],
+  "candidate_variants": [
+    "Baseline",
+    "Candidate A",
+    "Candidate B"
+  ]
+}

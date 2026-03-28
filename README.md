@@ -1,5 +1,49 @@
 # DeepSeek-V3.2-Exp
 
+## RTX 3090 Fork Notes
+
+This repo now includes a practical RTX 3090 (`sm_86`) rescue and optimization pass for the DeepSeek V3.1 / V3.2-Exp inference path. The starting point on a 3090 was not a healthy baseline: the default TileLang FP8 inference path in this repo did not compile on Ampere, so the provided implementation was not directly usable as-is on this class of GPU.
+
+What was changed in this fork:
+
+- built a working CUDA fallback path for the 3090 instead of relying on the non-compiling TileLang FP8 path
+- optimized the fallback path without intentionally changing model semantics
+- added a search/benchmark/control-plane under [`inference/search`](inference/search) so kernel work is measured, queued, and reproducible
+- documented the process, queue rules, prompts, and continuation workflow so other agents or contributors can keep the search going
+
+Main issues we hit and how they were solved:
+
+| Issue | Why it mattered on 3090 | What we changed |
+| :--- | :--- | :--- |
+| TileLang FP8 kernels did not compile on `sm_86` | the default inference implementation was not usable on the target GPU | added a working exact CUDA fallback path in [`inference/kernel.py`](inference/kernel.py) and wired it through [`inference/model.py`](inference/model.py) |
+| fallback path spent too much time in weight dequant and repeated setup | the working path was correct but slower than it needed to be | simplified exact dequant math, added selective cached-weight reuse, and reused shared quantized activations where safe |
+| search jobs could collide or waste GPU time | one GPU means one bad runner design ruins all measurements | added a single-owner experiment queue, shard/rebatch tools, retry tools, and queue-safe manifest generation |
+| one strict bitwise-equality rule was too blunt for every kernel | it rejected useful smooth-algebra candidates but should stay strict for routing-sensitive code | split policy into strict `exact` and declared `near-exact` lanes, while keeping index/routing/mask paths strict |
+
+Where the 3090 work landed:
+
+- shared code improvements in [`inference/kernel.py`](inference/kernel.py) and [`inference/model.py`](inference/model.py)
+- kernel and algorithm search scripts in [`inference/search`](inference/search)
+- queue and automation tooling in [`inference/search/queue`](inference/search/queue)
+- baseline and leaderboard reports in [`inference/search/reports`](inference/search/reports)
+
+Best measured results so far on the 3090:
+
+- `mla_wq_b`: up to about `5.90x` speedup at `m=1`, with strong wins still visible through larger prefill lengths
+- `mla_wkv_b`: about `1.84x` at small `m`
+- medium-length `mla_wq_b` shapes remain meaningfully faster, for example about `1.43x` at `m=384`
+- strict index-path work is instrumented and has been searched, but no accepted strict winner has been promoted yet
+
+If you want to continue this work or automate more of it, start here:
+
+- search workspace overview: [`inference/search/README.md`](inference/search/README.md)
+- GitHub-facing continuation guide: [`inference/search/AUTOMATION.md`](inference/search/AUTOMATION.md)
+- repo-contained kernel-search skill: [`inference/search/KERNEL_SPEED_SEARCH_SKILL.md`](inference/search/KERNEL_SPEED_SEARCH_SKILL.md)
+- process and acceptance policy: [`inference/search/PROCESS.md`](inference/search/PROCESS.md)
+- agent handoff: [`inference/search/AGENT_PLAYBOOK.md`](inference/search/AGENT_PLAYBOOK.md)
+- reusable agent prompts: [`inference/search/prompts`](inference/search/prompts)
+- queue model and submission rules: [`inference/search/queue/README.md`](inference/search/queue/README.md)
+
 <!-- markdownlint-disable first-line-h1 -->
 <!-- markdownlint-disable html -->
 <!-- markdownlint-disable no-duplicate-header -->

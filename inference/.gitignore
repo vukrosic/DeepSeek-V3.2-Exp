@@ -1,0 +1,33 @@
+__pycache__/
+phase0_*.json
+*.log
+*.out
+
+# local benchmark artifacts
+benchmark_*.json
+benchmark_*.log
+
+# search run output (machine-generated, large)
+search/__pycache__/
+search/runs/*
+!search/runs/.gitkeep
+search/baselines/*.json
+search/baselines/*.log
+
+# staged batch artifacts are generated locally and should not be committed
+search/staging/
+
+# queue runtime state (ephemeral)
+search/queue/pending/
+search/queue/running/
+search/queue/completed/
+search/queue/failed/
+search/queue/logs/
+search/queue/archived_pending/
+search/queue/*.lock
+search/queue/runner.out
+
+# generated report snapshots and machine-written summaries
+search/reports/*.json
+search/reports/*.log
+search/reports/queue-live-summary.md

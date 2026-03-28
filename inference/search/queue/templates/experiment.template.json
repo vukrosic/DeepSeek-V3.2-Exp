@@ -1,0 +1,18 @@
+{
+  "id": "20260328-070000-example-job",
+  "owner": "agent-name",
+  "priority": 100,
+  "task_id": "02_fp8_gemm_exact",
+  "run_dir": "search/runs/20260328-070000-02_fp8_gemm_exact-example",
+  "cwd": "/workspace/DeepSeek-V3.2-Exp/inference",
+  "command": "PYTHONPATH=/workspace/DeepSeek-V3.2-Exp/inference python3 search/projection_100_sweep.py --target mla_wq_b --json-out search/runs/20260328-070000-02_fp8_gemm_exact-example/results_sweep.json",
+  "result_paths": [
+    "search/runs/20260328-070000-02_fp8_gemm_exact-example/results_sweep.json"
+  ],
+  "tags": [
+    "gpu",
+    "exact",
+    "search"
+  ],
+  "notes": "short human explanation of the experiment"
+}

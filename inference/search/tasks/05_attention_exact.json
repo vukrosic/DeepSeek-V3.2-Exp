@@ -1,0 +1,33 @@
+{
+  "id": "05_attention_exact",
+  "title": "Attention Exact Search",
+  "scope": "Attention score and apply path only",
+  "goal": "Search exact attention implementations that preserve the same causal and index-mask semantics.",
+  "depends_on": [
+    "03_fp8_index_exact"
+  ],
+  "primary_script": "kernel_phase0_harness.py",
+  "target_metrics": [
+    "future.attention.prefill.mean_ms",
+    "future.attention.decode.mean_ms"
+  ],
+  "exactness_gate": [
+    "Masked score tensor must match baseline exactly.",
+    "Output activations must match baseline exactly."
+  ],
+  "allowed_changes": [
+    "Kernel fusion",
+    "Buffer reuse",
+    "Backend implementation"
+  ],
+  "forbidden_changes": [
+    "Sparse approximation",
+    "Mask semantic changes",
+    "Softmax definition changes"
+  ],
+  "candidate_variants": [
+    "Exact fused masked-softmax kernel",
+    "Exact buffer-reuse path",
+    "Exact CUDA fused attention path"
+  ]
+}
