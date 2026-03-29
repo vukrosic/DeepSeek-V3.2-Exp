@@ -11,6 +11,7 @@ from typing import Iterable, List
 
 LOCAL_ROOT = Path(__file__).resolve().parents[2]
 REMOTE_ROOT = "/workspace/DeepSeek-V3.2-Exp/inference"
+REMOTE_PYTHON = "/venv/main/bin/python3"
 RUNS_DIR = LOCAL_ROOT / "search" / "runs"
 STAGING_DIR = LOCAL_ROOT / "search" / "staging"
 REMOTE_QUEUE = LOCAL_ROOT / "search" / "queue" / "remote_queue.py"
@@ -100,7 +101,7 @@ def build_manifest(
         "run_dir": str(run_dir_rel),
         "cwd": REMOTE_ROOT,
         "command": (
-            f"PYTHONPATH={REMOTE_ROOT} python3 {sweep_script} "
+            f"PYTHONPATH={REMOTE_ROOT} {REMOTE_PYTHON} {sweep_script} "
             f"--config {config} "
             f"--batch-size {batch_size} "
             f"--prefill-len {prefill_len} "

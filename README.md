@@ -27,6 +27,28 @@ Where the 3090 work landed:
 - queue and automation tooling in [`inference/search/queue`](inference/search/queue)
 - baseline and leaderboard reports in [`inference/search/reports`](inference/search/reports)
 
+## Beginner Auto-Research Path
+
+If you are new to this repo, use this order:
+
+1. Read [`inference/search/BEGINNER_GUIDE.md`](inference/search/BEGINNER_GUIDE.md).
+2. Read [`inference/search/README.md`](inference/search/README.md).
+3. Read [`inference/search/PROCESS.md`](inference/search/PROCESS.md).
+4. Pick one task from [`inference/search/tasks`](inference/search/tasks).
+5. Use [`inference/search/search_runner.py`](inference/search/search_runner.py) to validate and create a run folder.
+6. Use [`inference/search/queue/queue_agent.py`](inference/search/queue/queue_agent.py) for queue-safe GPU work.
+7. Keep changes local until they win exactness and benchmark checks.
+
+Minimal entry commands:
+
+```bash
+cd inference
+python3 search/search_runner.py validate
+python3 search/search_runner.py list
+python3 search/search_runner.py show 02_fp8_gemm_exact
+python3 search/queue/queue_agent.py status
+```
+
 Best measured results so far on the 3090:
 
 - `mla_wq_b`: up to about `5.90x` speedup at `m=1`, with strong wins still visible through larger prefill lengths

@@ -17,6 +17,7 @@ from queue_runner import LOCK_PATH, PENDING_DIR, dump_json, load_json, pid_is_al
 
 INDEX_TASK_ID = "03_fp8_index_exact"
 DEFAULT_SHARD_SIZE = 20
+REMOTE_PYTHON = "/venv/main/bin/python3"
 ID_PATTERN = re.compile(r"^gauss-index-batch-20260328-(?P<shape>[^-]+)-cand-(?P<cand>\d+)$")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -138,7 +139,7 @@ def build_shard_manifest(
         "cwd": "/workspace/DeepSeek-V3.2-Exp/inference",
         "command": (
             "PYTHONPATH=/workspace/DeepSeek-V3.2-Exp/inference "
-            "python3 search/index_200_sweep.py run "
+            f"{REMOTE_PYTHON} search/index_200_sweep.py run "
             f"--shape {shape} "
             f"{candidate_flags} "
             f"--json-out {result_path}"

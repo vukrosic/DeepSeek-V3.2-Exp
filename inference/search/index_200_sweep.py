@@ -28,6 +28,7 @@ DEFAULT_PREFILL_LEN = 256
 DEFAULT_DECODE_CONTEXT = 2048
 DEFAULT_WARMUP = 5
 DEFAULT_ITERS = 20
+REMOTE_PYTHON = "/venv/main/bin/python3"
 
 Q_VARIANTS = [
     "fp32_contig",
@@ -322,7 +323,7 @@ def build_queue_manifest(
         "cwd": "/workspace/DeepSeek-V3.2-Exp/inference",
         "command": (
             "PYTHONPATH=/workspace/DeepSeek-V3.2-Exp/inference "
-            "python3 search/index_200_sweep.py run "
+            f"{REMOTE_PYTHON} search/index_200_sweep.py run "
             f"--shape {shape_name} "
             f"{candidate_flags} "
             f"--json-out {rel_result}"

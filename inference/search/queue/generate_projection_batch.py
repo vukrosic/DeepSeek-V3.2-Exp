@@ -8,6 +8,7 @@ from pathlib import Path
 
 LOCAL_ROOT = Path(__file__).resolve().parents[2]
 REMOTE_ROOT = "/workspace/DeepSeek-V3.2-Exp/inference"
+REMOTE_PYTHON = "/venv/main/bin/python3"
 RUNS_DIR = LOCAL_ROOT / "search" / "runs"
 STAGING_DIR = LOCAL_ROOT / "search" / "staging"
 REMOTE_QUEUE = LOCAL_ROOT / "search" / "queue" / "remote_queue.py"
@@ -35,29 +36,21 @@ def build_manifest(
     target: str,
     prefill_len: int,
     sweep_script: str,
-    candidate_offset: int,
-    candidate_limit: int,
 ) -> dict:
     sweep_stem = Path(sweep_script).stem
-    candidate_tag = f"o{candidate_offset}-n{candidate_limit}" if candidate_limit > 0 else f"o{candidate_offset}-all"
-    run_slug = f"{utc_stamp()}-{TASK_ID}-{target}-l{prefill_len}-{sweep_stem}-{candidate_tag}"
+    run_slug = f"{utc_stamp()}-{TASK_ID}-{target}-l{prefill_len}-{sweep_stem}"
     run_dir_rel = Path("search") / "runs" / run_slug
     json_rel = run_dir_rel / "results_sweep.json"
-    candidate_flags = ""
-    if candidate_offset > 0:
-        candidate_flags += f" --candidate-offset {candidate_offset}"
-    if candidate_limit > 0:
-        candidate_flags += f" --candidate-limit {candidate_limit}"
     return {
-        "id": f"{batch_tag}-{target}-l{prefill_len}-{sweep_stem}-{candidate_tag}",
+        "id": f"{batch_tag}-{target}-l{prefill_len}-{sweep_stem}",
         "owner": owner,
         "priority": priority,
         "task_id": TASK_ID,
         "run_dir": str(run_dir_rel),
         "cwd": REMOTE_ROOT,
         "command": (
-            f"PYTHONPATH={REMOTE_ROOT} python3 {sweep_script} --target {target} "
-            f"--prefill-len {prefill_len}{candidate_flags} --json-out {json_rel}"
+            f"PYTHONPATH={REMOTE_ROOT} {REMOTE_PYTHON} {sweep_script} --target {target} "
+            f"--prefill-len {prefill_len} --json-out {json_rel}"
         ),
         "result_paths": [str(json_rel)],
         "tags": [
@@ -66,12 +59,10 @@ def build_manifest(
             sweep_stem,
             target,
             f"prefill_{prefill_len}",
-            candidate_tag,
         ],
         "notes": (
             f"Exact projection sweep via {sweep_stem} for {target} "
-            f"at prefill_len={prefill_len} with candidate window {candidate_tag} "
-            f"on the RTX 3090 fallback path."
+            f"at prefill_len={prefill_len} on the RTX 3090 fallback path."
         ),
     }
 
@@ -84,8 +75,6 @@ def main() -> None:
     parser.add_argument("--targets", nargs="+", default=DEFAULT_TARGETS)
     parser.add_argument("--lengths", nargs="+", type=int, required=True)
     parser.add_argument("--sweep-script", default=SWEEP_SCRIPT)
-    parser.add_argument("--candidate-offset", type=int, default=0)
-    parser.add_argument("--candidate-limit", type=int, default=100)
     parser.add_argument("--submit", action="store_true")
     args = parser.parse_args()
 
@@ -104,8 +93,6 @@ def main() -> None:
                 target,
                 prefill_len,
                 args.sweep_script,
-                args.candidate_offset,
-                args.candidate_limit,
             )
             manifests.append(manifest)
             priority += 1
@@ -128,8 +115,6 @@ def main() -> None:
         "targets": args.targets,
         "lengths": args.lengths,
         "sweep_script": args.sweep_script,
-        "candidate_offset": args.candidate_offset,
-        "candidate_limit": args.candidate_limit,
         "manifest_count": len(manifests),
         "submitted": bool(args.submit),
         "manifests_dir": str(manifests_dir),

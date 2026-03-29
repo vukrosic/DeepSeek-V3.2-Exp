@@ -104,7 +104,15 @@ def _run_cached_weight_op(
 
 def _select_cached_weight_plan(target_hint: Optional[str], m: int) -> tuple[str, str]:
     if target_hint == "mla_wkv_b":
-        return "row", ("mm" if m >= 128 else "flinear")
+        # The exact fallback search has shown the transposed cached layout to be
+        # the best fit for the MLA wkv_b projection. Keep the fast path simple
+        # and route all MLA wkv_b cached-weight calls through the transposed mm
+        # plan so the model can reuse the pre-transposed cache directly.
+        return "t", "mm"
+    if target_hint == "indexer_wq_b":
+        if m == 1:
+            return "row", "matmul"
+        return "row", "flinear"
     if target_hint == "mla_wq_b":
         if m in {2, 32}:
             return "row", "matmul"
@@ -113,7 +121,7 @@ def _select_cached_weight_plan(target_hint: Optional[str], m: int) -> tuple[str,
         return "row", "flinear"
     if target_hint == "indexer_wk":
         if m == 1:
-            return "t", "matmul"
+            return "row", "matmul"
         if m in {4, 8, 32, 1024}:
             return "t", "mm"
         if m in {2, 16, 256}:
@@ -212,9 +220,10 @@ def _fp8_index_torch(
         q_s = q_s.squeeze(-1)
     if k_s.dim() == 3 and k_s.size(-1) == 1:
         k_s = k_s.squeeze(-1)
-    q_deq = (q.float() * q_s.float().unsqueeze(-1)).to(compute_dtype)
-    k_deq = (k.float() * k_s.float().unsqueeze(-1)).to(compute_dtype)
-    logits = torch.einsum("bnd,bmhd->bmnh", k_deq, q_deq)
+    q_deq = (q.float() * q_s.float().unsqueeze(-1)).to(compute_dtype).contiguous()
+    k_deq = (k.float() * k_s.float().unsqueeze(-1)).to(compute_dtype).contiguous()
+    k_t = k_deq.unsqueeze(1).transpose(-1, -2)
+    logits = torch.matmul(q_deq, k_t).permute(0, 1, 3, 2)
     return logits.clamp_min_(0).sum(dim=-1, dtype=torch.float32)
 
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import datetime as dt
+import os
 import shlex
 import subprocess
 import tempfile
@@ -8,13 +9,37 @@ import uuid
 from pathlib import Path
 
 
-GPU = Path("/root/auto-research/gpu")
+REMOTE_HOST = os.getenv("DEEPSEEK_REMOTE_HOST", "ssh6.vast.ai")
+REMOTE_PORT = os.getenv("DEEPSEEK_REMOTE_PORT", "31117")
+REMOTE_USER = os.getenv("DEEPSEEK_REMOTE_USER", "root")
+REMOTE_KEY = Path(os.getenv("DEEPSEEK_REMOTE_KEY", "~/.ssh/vast_ai_ed25519")).expanduser()
 REMOTE_ROOT = "/workspace/DeepSeek-V3.2-Exp/inference"
 
 
-def gpu_run(command: str) -> subprocess.CompletedProcess[str]:
+def ssh_base() -> list[str]:
+    return [
+        "ssh",
+        "-p",
+        str(REMOTE_PORT),
+        "-i",
+        str(REMOTE_KEY),
+        f"{REMOTE_USER}@{REMOTE_HOST}",
+    ]
+
+
+def scp_base() -> list[str]:
+    return [
+        "scp",
+        "-P",
+        str(REMOTE_PORT),
+        "-i",
+        str(REMOTE_KEY),
+    ]
+
+
+def remote_run(command: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(GPU), "run", command],
+        ssh_base() + [command],
         text=True,
         capture_output=True,
         check=True,
@@ -22,7 +47,7 @@ def gpu_run(command: str) -> subprocess.CompletedProcess[str]:
 
 
 def cmd_status() -> None:
-    proc = gpu_run(
+    proc = remote_run(
         f"cd {REMOTE_ROOT} && PYTHONPATH={REMOTE_ROOT} python3 search/queue/queue_runner.py status"
     )
     print(proc.stdout.strip())
@@ -31,8 +56,8 @@ def cmd_status() -> None:
 def cmd_submit(manifest_path: str) -> None:
     local = Path(manifest_path).resolve()
     remote_tmp = f"/workspace/{local.name}"
-    subprocess.run([str(GPU), "upload", str(local), remote_tmp], check=True, text=True)
-    proc = gpu_run(
+    subprocess.run(scp_base() + [str(local), f"{REMOTE_USER}@{REMOTE_HOST}:{remote_tmp}"], check=True, text=True)
+    proc = remote_run(
         f"cd {REMOTE_ROOT} && PYTHONPATH={REMOTE_ROOT} python3 search/queue/queue_runner.py submit {shlex.quote(remote_tmp)}"
     )
     print(proc.stdout.strip())
@@ -44,8 +69,8 @@ def cmd_submit_dir(manifest_dir: str) -> None:
         raise SystemExit(f"not a directory: {local}")
     suffix = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     remote_tmp = f"/workspace/{local.name}-{suffix}"
-    subprocess.run([str(GPU), "upload", str(local), remote_tmp], check=True, text=True)
-    proc = gpu_run(
+    subprocess.run(scp_base() + ["-r", str(local), f"{REMOTE_USER}@{REMOTE_HOST}:{remote_tmp}"], check=True, text=True)
+    proc = remote_run(
         " && ".join(
             [
                 f"cd {REMOTE_ROOT}",
@@ -59,7 +84,7 @@ def cmd_submit_dir(manifest_dir: str) -> None:
 
 
 def cmd_tail(lines: int) -> None:
-    proc = gpu_run(f"cd {REMOTE_ROOT} && tail -n {lines} search/queue/runner.out")
+    proc = remote_run(f"cd {REMOTE_ROOT} && tail -n {lines} search/queue/runner.out")
     print(proc.stdout.strip())
 
 

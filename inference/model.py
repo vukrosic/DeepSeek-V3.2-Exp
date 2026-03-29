@@ -485,7 +485,7 @@ class Indexer(torch.nn.Module):
                 self.dequant_wq_b = weight_dequant(self.wq_b.weight, self.wq_b.scale).float().contiguous()
             if qr_fp8 is None or qr_scale is None:
                 qr_fp8, qr_scale = act_quant(qr, block_size, self.scale_fmt)
-            q = fp8_gemm_cached_weight(qr_fp8, qr_scale, self.dequant_wq_b)
+            q = fp8_gemm_cached_weight(qr_fp8, qr_scale, self.dequant_wq_b, target_hint="indexer_wq_b")
         else:
             q = self.wq_b(qr)
         q = q.view(bsz, seqlen, self.n_heads, self.head_dim)
@@ -597,6 +597,7 @@ class MLA(nn.Module):
         self.dequant_wq_b = None
         self.dequant_wkv_a = None
         self.dequant_wkv_b = None
+        self.dequant_wkv_b_t = None
 
     def forward(self, x: torch.Tensor, start_pos: int, freqs_cis: torch.Tensor, mask: Optional[torch.Tensor]):
         """
@@ -653,8 +654,16 @@ class MLA(nn.Module):
             if USE_TORCH_FP8_FALLBACK and self.wkv_b.scale is not None:
                 if self.dequant_wkv_b is None:
                     self.dequant_wkv_b = weight_dequant(self.wkv_b.weight, self.wkv_b.scale).float().contiguous()
+                if self.dequant_wkv_b_t is None:
+                    self.dequant_wkv_b_t = self.dequant_wkv_b.t().contiguous()
                 kv_fp8, kv_scale = act_quant(kv, block_size, self.scale_fmt)
-                kv = fp8_gemm_cached_weight(kv_fp8, kv_scale, self.dequant_wkv_b, target_hint="mla_wkv_b")
+                kv = fp8_gemm_cached_weight(
+                    kv_fp8,
+                    kv_scale,
+                    self.dequant_wkv_b,
+                    target_hint="mla_wkv_b",
+                    b_deq_t=self.dequant_wkv_b_t,
+                )
             else:
                 kv = self.wkv_b(kv)
             kv = kv.view(bsz, seqlen, self.n_local_heads, self.qk_nope_head_dim + self.v_head_dim)

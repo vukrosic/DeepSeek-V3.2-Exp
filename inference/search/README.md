@@ -4,6 +4,7 @@ This directory is the control plane for speed work that must preserve functional
 
 ## Start Here
 
+- If you are new, read [`BEGINNER_GUIDE.md`](BEGINNER_GUIDE.md) first.
 - `AGENT_PLAYBOOK.md`: handoff document for any agent continuing the search
 - `AUTOMATION.md`: GitHub-facing continuation guide for contributors and agents
 - `KERNEL_SPEED_SEARCH_SKILL.md`: repo-contained kernel optimization workflow
